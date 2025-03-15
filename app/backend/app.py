@@ -5,6 +5,8 @@ import logging
 import mimetypes
 import os
 import time
+import base64
+import shutil
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, Union, cast
 
@@ -47,7 +49,8 @@ from quart import (
     send_from_directory,
 )
 from quart_cors import cors
-
+from azure.data.tables import TableServiceClient
+from azure.core.credentials import AzureNamedKeyCredential
 from approaches.approach import Approach
 from approaches.chatreadretrieveread import ChatReadRetrieveReadApproach
 from approaches.chatreadretrievereadvision import ChatReadRetrieveReadVisionApproach
@@ -94,12 +97,29 @@ from prepdocs import (
 )
 from prepdocslib.filestrategy import UploadUserFileStrategy
 from prepdocslib.listfilestrategy import File
+from admin.doc_processor import prepdocs_processor
+from admin.utilils_helper import (
+    get_service_accessories, 
+    generate_pdf_async,
+    get_blob_container_client,
+    get_search_client,
+    remove_index_blob,
+    get_config_chat_approaches
+
+)
+from admin.table_storage import (
+    upsert_chatlog_entity,
+    update_is_deleted
+)
+import tempfile
+
+CONFIG_TABLE_SERVICE_CLIENT = 'table_service_client'
+CONFIG_OPENAI_CLIENT = "openai_client"
 
 bp = Blueprint("routes", __name__, static_folder="static")
 # Fix Windows registry issue with mimetypes
 mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
-
 
 @bp.route("/")
 async def index():
@@ -207,38 +227,38 @@ async def format_as_ndjson(r: AsyncGenerator[dict, None]) -> AsyncGenerator[str,
         yield json.dumps(error_dict(error))
 
 
-@bp.route("/chat", methods=["POST"])
-@authenticated
-async def chat(auth_claims: Dict[str, Any]):
-    if not request.is_json:
-        return jsonify({"error": "request must be json"}), 415
-    request_json = await request.get_json()
-    context = request_json.get("context", {})
-    context["auth_claims"] = auth_claims
-    try:
-        use_gpt4v = context.get("overrides", {}).get("use_gpt4v", False)
-        approach: Approach
-        if use_gpt4v and CONFIG_CHAT_VISION_APPROACH in current_app.config:
-            approach = cast(Approach, current_app.config[CONFIG_CHAT_VISION_APPROACH])
-        else:
-            approach = cast(Approach, current_app.config[CONFIG_CHAT_APPROACH])
+# @bp.route("/chat", methods=["POST"])
+# @authenticated
+# async def chat(auth_claims: Dict[str, Any]):
+#     if not request.is_json:
+#         return jsonify({"error": "request must be json"}), 415
+#     request_json = await request.get_json()
+#     context = request_json.get("context", {})
+#     context["auth_claims"] = auth_claims
+#     try:
+#         use_gpt4v = context.get("overrides", {}).get("use_gpt4v", False)
+#         approach: Approach
+#         if use_gpt4v and CONFIG_CHAT_VISION_APPROACH in current_app.config:
+#             approach = cast(Approach, current_app.config[CONFIG_CHAT_VISION_APPROACH])
+#         else:
+#             approach = cast(Approach, current_app.config[CONFIG_CHAT_APPROACH])
 
-        # If session state is provided, persists the session state,
-        # else creates a new session_id depending on the chat history options enabled.
-        session_state = request_json.get("session_state")
-        if session_state is None:
-            session_state = create_session_id(
-                current_app.config[CONFIG_CHAT_HISTORY_COSMOS_ENABLED],
-                current_app.config[CONFIG_CHAT_HISTORY_BROWSER_ENABLED],
-            )
-        result = await approach.run(
-            request_json["messages"],
-            context=context,
-            session_state=session_state,
-        )
-        return jsonify(result)
-    except Exception as error:
-        return error_response(error, "/chat")
+#         # If session state is provided, persists the session state,
+#         # else creates a new session_id depending on the chat history options enabled.
+#         session_state = request_json.get("session_state")
+#         if session_state is None:
+#             session_state = create_session_id(
+#                 current_app.config[CONFIG_CHAT_HISTORY_COSMOS_ENABLED],
+#                 current_app.config[CONFIG_CHAT_HISTORY_BROWSER_ENABLED],
+#             )
+#         result = await approach.run(
+#             request_json["messages"],
+#             context=context,
+#             session_state=session_state,
+#         )
+#         return jsonify(result)
+#     except Exception as error:
+#         return error_response(error, "/chat")
 
 
 @bp.route("/chat/stream", methods=["POST"])
@@ -345,7 +365,146 @@ async def speech():
     except Exception as e:
         current_app.logger.exception("Exception in /speech")
         return jsonify({"error": str(e)}), 500
+    
+@bp.route('/delist_files', methods=['POST'])
+async def delist_files():
+    if not request.is_json:
+        return jsonify({"error": "request must be json"}), 415
+    request_json = await request.get_json()
 
+    if "row_keys" not in request_json or "files" not in request_json or "service" not in request_json:
+        return jsonify({"error": "Invalid input data"}), 400
+    
+    service = request_json.get('service')
+    service_accessories = await get_service_accessories(service)
+
+    if service_accessories:
+        azure_search_index, azure_storage_container, _, _ = service_accessories
+    else:
+        return jsonify({"error": "unknown service"}), 400
+
+    row_keys = request_json["row_keys"]
+    files = request_json["files"]
+
+    try:
+        blob_container = get_blob_container_client(azure_storage_container)
+        search_client = get_search_client(azure_search_index)
+            
+        for row_key, file in zip(row_keys, files):
+            # remove file from index & container
+            await remove_index_blob(search_client, blob_container, file)
+
+            # update the entry
+            await update_is_deleted(service, row_key)
+        return jsonify({"response": "Files delisted successfully"}), 200
+
+    except Exception as e:
+        logging.exception(f"Exception in /delist_files: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@bp.route('/process', methods=['POST'])
+async def process():
+    try:
+        # Get the absolute path to the 'data' directory
+        data_dir = os.path.abspath('./data')
+        temp_files_dir = tempfile.mkdtemp(dir=data_dir)
+
+        # Retrieve data from the request
+        data = await request.get_json()
+        service = data.get("service")
+        uploaded_files = data.get("files")
+        url = data.get("url")
+        max_depth = data.get("max_depth", 2)
+        if not service or (not uploaded_files and not url):
+            return jsonify({"error": "Please provide a service and either files or a URL"}), 400
+        
+        # Get index, blob & prompt
+        service_accessories = await get_service_accessories(service)
+        
+        if service_accessories:
+            azure_search_index, azure_storage_container, _, use_external_source = service_accessories
+            if use_external_source:
+                return jsonify({"error": "Unauthorized access! Use different service"}), 400
+        else:
+            return jsonify({"error": "Unknown service"}), 400    
+
+        try:
+            # Save the uploaded files to the temporary directory
+            if uploaded_files:
+                for uploaded_file in uploaded_files:
+                    file_path = os.path.join(temp_files_dir, uploaded_file["name"])
+                    with open(file_path, "wb") as f:
+                        f.write(base64.b64decode(uploaded_file["data"]))
+
+                    if file_path.lower().endswith(('.txt', '.docx')):
+                        # Convert non-PDF files to PDF
+                        success, result = await generate_pdf_async(file_path, temp_files_dir)
+
+                        if success:
+                            os.remove(file_path)
+                
+            # Run the prepdocs_processor asynchronously 
+           
+            processed_files = await prepdocs_processor(temp_files_dir, azure_storage_container, azure_search_index, max_depth, url)
+            
+            print("FILES PROCESSED SUCCESSFULLY AND NOW I AM IN ENDPOINT FILE...........")
+            for processed_file in processed_files:
+                # if processed_file[1]: #TODO: only save entry for successfully files - rollback unsuccesful files from storage
+                file_entry = {"file": processed_file[0]}
+                await upsert_chatlog_entity(service, "adminApp", "process", file_entry, 0)
+
+            # Clean up and respond with success
+            shutil.rmtree(temp_files_dir)
+            return jsonify({"message": "Files processed successfully",
+                            "processed_files": processed_files})
+
+        except Exception as e:
+            # Handle exceptions that occur during file processing
+            return jsonify({"error": f"An error occurred during processing: {str(e)}"}), 500
+
+    except Exception as e:
+        logging.exception(f"Exception in /process: {str(e)}")
+        # Handle other exceptions (e.g., JSON parsing, temporary directory creation)
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
+@bp.route("/chat", methods=["POST"])
+async def chat():
+    if not request.is_json:
+        return jsonify({"error": "request must be json"}), 415
+    request_json = await request.get_json()
+    approach = request_json["approach"]
+    optional_prompt = request_json.get("optional_prompt")
+    service = request_json.get('service', {})
+    user_name = request_json.get('user_name')
+    user_info = request_json.get('user_info')
+    chat_history = request_json.get('chat_history')
+    is_deleted = request_json.get('is_deleted', 0)
+    api_function = 'chat'
+
+    # Get index, blob & prompt
+    service_accessories = await get_service_accessories(service)
+
+    if service_accessories:
+        azure_search_index, azure_storage_container, service_prompt, use_external_source = service_accessories
+        service_prompt = optional_prompt if optional_prompt else service_prompt
+        if use_external_source:
+            return jsonify({"error": "Unauthorized access! Use general chat"}), 400
+    else:
+        return jsonify({"error": "Unknown service"}), 400
+    try:
+        impl = get_config_chat_approaches(azure_search_index).get(approach)
+        if not impl:
+            return jsonify({"error": "unknown approach"}), 400
+        r = await impl.run_without_streaming(request_json["chat_history"], request_json.get("overrides", {}), user_info)
+        print(f"Response:::::::::{r}")
+        chat_entry = [{"user": chat_history[-1]["content"]}, {"bot": r['message']['content']}]
+        # Strore chat logs
+        await upsert_chatlog_entity(service, user_name, api_function, chat_entry, is_deleted)
+        
+        return jsonify(r)
+    except Exception as e:
+        logging.exception(f"Exception in /chat: {str(e)}")
+        return jsonify({"error": str(e)}), 500 
 
 @bp.post("/upload")
 @authenticated
@@ -469,6 +628,11 @@ async def setup_clients():
 
     # WEBSITE_HOSTNAME is always set by App Service, RUNNING_IN_PRODUCTION is set in main.bicep
     RUNNING_ON_AZURE = os.getenv("WEBSITE_HOSTNAME") is not None or os.getenv("RUNNING_IN_PRODUCTION") is not None
+    storage_creds = azure_credential if os.environ["AZURE_STORAGE_KEY"] is None else os.environ["AZURE_STORAGE_KEY"]
+    tbl_credential = AzureNamedKeyCredential(f"{AZURE_STORAGE_ACCOUNT}", storage_creds)
+    table_service_client = TableServiceClient(
+        endpoint=f"https://{AZURE_STORAGE_ACCOUNT}.table.core.windows.net", 
+        credential=tbl_credential)
 
     # Use the current user identity for keyless authentication to Azure services.
     # This assumes you use 'azd auth login' locally, and managed identity when deployed on Azure.
@@ -497,6 +661,7 @@ async def setup_clients():
 
     # Set the Azure credential in the app config for use in other parts of the app
     current_app.config[CONFIG_CREDENTIAL] = azure_credential
+    current_app.config[CONFIG_TABLE_SERVICE_CLIENT] = table_service_client
 
     # Set up clients for AI Search and Storage
     search_client = SearchClient(

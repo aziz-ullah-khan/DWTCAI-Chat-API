@@ -104,6 +104,7 @@ class FileStrategy(Strategy):
                         blob_image_embeddings: Optional[List[List[float]]] = None
                         if self.image_embeddings and blob_sas_uris:
                             blob_image_embeddings = await self.image_embeddings.create_embeddings(blob_sas_uris)
+
                         await search_manager.update_content(sections, blob_image_embeddings, url=file.url)
                 finally:
                     if file:

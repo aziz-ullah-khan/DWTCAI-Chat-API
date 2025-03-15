@@ -237,12 +237,21 @@ def setup_image_embeddings_service(
     return image_embeddings_service
 
 
+# async def main(strategy: Strategy, setup_index: bool = True):
+#     if setup_index:
+#         await strategy.setup()
+
+#     await strategy.run()
+
+
 async def main(strategy: Strategy, setup_index: bool = True):
-    if setup_index:
-        await strategy.setup()
+    try:
+        if setup_index:
+            await strategy.setup()
 
-    await strategy.run()
-
+        await strategy.run()
+    except Exception as e:
+        logger.error(f"An error occurred in main: {e}", exc_info=True)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -281,6 +290,12 @@ if __name__ == "__main__":
         required=False,
         help="Optional. Use this Azure Blob Storage account key instead of the current user identity to login (use az login to set current user for Azure)",
     )
+
+    parser.add_argument(
+    "--storageaccount",
+    required=False,
+    help="Optional. Specify the Azure Blob Storage account name instead of using the default from environment variables",
+   )
     parser.add_argument(
         "--datalakekey", required=False, help="Optional. Use this key when authenticating to Azure Data Lake Gen2"
     )
@@ -296,6 +311,10 @@ if __name__ == "__main__":
     )
 
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+
+    parser.add_argument("--container", required=False, help="Optional. Specify the Azure Blob Storage container instead of using the default from environment variables")
+    parser.add_argument("--index", required=False, help="Optional. Specify the Azure Search index name instead of using the default from environment variables")
+    
     args = parser.parse_args()
 
     if args.verbose:
@@ -304,7 +323,7 @@ if __name__ == "__main__":
         # to avoid seeing the noisy INFO level logs from the Azure SDKs
         logger.setLevel(logging.DEBUG)
 
-    load_azd_env()
+    # load_azd_env()
 
     if os.getenv("AZURE_PUBLIC_NETWORK_ACCESS") == "Disabled":
         logger.error("AZURE_PUBLIC_NETWORK_ACCESS is set to Disabled. Exiting.")
@@ -333,24 +352,27 @@ if __name__ == "__main__":
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    
 
     search_info = loop.run_until_complete(
         setup_search_info(
             search_service=os.environ["AZURE_SEARCH_SERVICE"],
-            index_name=os.environ["AZURE_SEARCH_INDEX"],
+            index_name=args.index or os.environ["AZURE_SEARCH_INDEX"],
             azure_credential=azd_credential,
-            search_key=clean_key_if_exists(args.searchkey),
+            search_key= os.environ["AZURE_SEARCH_KEY"],
         )
     )
+
     blob_manager = setup_blob_manager(
         azure_credential=azd_credential,
         storage_account=os.environ["AZURE_STORAGE_ACCOUNT"],
-        storage_container=os.environ["AZURE_STORAGE_CONTAINER"],
+        storage_container=args.container or os.environ["AZURE_STORAGE_CONTAINER"],
         storage_resource_group=os.environ["AZURE_STORAGE_RESOURCE_GROUP"],
         subscription_id=os.environ["AZURE_SUBSCRIPTION_ID"],
         search_images=use_gptvision,
-        storage_key=clean_key_if_exists(args.storagekey),
+        storage_key=os.environ["AZURE_STORAGE_KEY"],
     )
+
     list_file_strategy = setup_list_file_strategy(
         azure_credential=azd_credential,
         local_files=args.files,
@@ -435,6 +457,8 @@ if __name__ == "__main__":
             use_content_understanding=use_content_understanding,
             content_understanding_endpoint=os.getenv("AZURE_CONTENTUNDERSTANDING_ENDPOINT"),
         )
+
+    
 
     loop.run_until_complete(main(ingestion_strategy, setup_index=not args.remove and not args.removeall))
     loop.close()

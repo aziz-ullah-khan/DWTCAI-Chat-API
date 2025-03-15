@@ -293,7 +293,6 @@ class SearchManager:
                 if image_embeddings:
                     for i, (document, section) in enumerate(zip(documents, batch)):
                         document["imageEmbedding"] = image_embeddings[section.split_page.page_num]
-
                 await search_client.upload_documents(documents)
 
     async def remove_content(self, path: Optional[str] = None, only_oid: Optional[str] = None):
