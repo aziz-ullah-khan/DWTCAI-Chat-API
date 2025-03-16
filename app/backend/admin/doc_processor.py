@@ -7,15 +7,16 @@ import ast
 import asyncio
 import re
 
-def extract_filename(stdout_lines):
-    pattern = r"Ingesting '(.+?)'"  # Looks for "Ingesting 'filename'"
+def extract_filenames(stdout_lines):
+    pattern = r"Ingesting '(.+?)'"  # Regex to match file names
+    filenames = []  # List to store all filenames
     
     for line in stdout_lines:
         match = re.search(pattern, line)
         if match:
-            return match.group(1)  # Extract the filename
+            filenames.append(match.group(1))  # Add each filename to the list
 
-    return None  # Return None if no filename is found
+    return filenames  # Return the complete list
 
 async def run_command(command):
     try:
@@ -71,8 +72,8 @@ async def prepdocs_processor(files_dir, container, index, max_depth, url=None):
         stdout_lines = await run_command(command)
 
 
-    filename = extract_filename(stdout_lines)
-    return [filename]
+    filename = extract_filenames(stdout_lines)
+    return filename
 
     # print("STDOUT OUTPUT:", stdout_lines)  # Print full output for debugging
 

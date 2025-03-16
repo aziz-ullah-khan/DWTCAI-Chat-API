@@ -109,7 +109,14 @@ from admin.utilils_helper import (
 )
 from admin.table_storage import (
     upsert_chatlog_entity,
-    update_is_deleted
+    update_is_deleted,
+    upsert_feedback_entity,
+    upsert_api_configuration,
+    get_api_configuration,
+    delete_api_configuration,
+    upsert_prompt_entity,
+    get_prompt_entity,
+    get_feedback_entries
 )
 import tempfile
 
@@ -143,49 +150,49 @@ async def assets(path):
     return await send_from_directory(Path(__file__).resolve().parent / "static" / "assets", path)
 
 
-@bp.route("/content/<path>")
-@authenticated_path
-async def content_file(path: str, auth_claims: Dict[str, Any]):
-    """
-    Serve content files from blob storage from within the app to keep the example self-contained.
-    *** NOTE *** if you are using app services authentication, this route will return unauthorized to all users that are not logged in
-    if AZURE_ENFORCE_ACCESS_CONTROL is not set or false, logged in users can access all files regardless of access control
-    if AZURE_ENFORCE_ACCESS_CONTROL is set to true, logged in users can only access files they have access to
-    This is also slow and memory hungry.
-    """
-    # Remove page number from path, filename-1.txt -> filename.txt
-    # This shouldn't typically be necessary as browsers don't send hash fragments to servers
-    if path.find("#page=") > 0:
-        path_parts = path.rsplit("#page=", 1)
-        path = path_parts[0]
-    current_app.logger.info("Opening file %s", path)
-    blob_container_client: ContainerClient = current_app.config[CONFIG_BLOB_CONTAINER_CLIENT]
-    blob: Union[BlobDownloader, DatalakeDownloader]
-    try:
-        blob = await blob_container_client.get_blob_client(path).download_blob()
-    except ResourceNotFoundError:
-        current_app.logger.info("Path not found in general Blob container: %s", path)
-        if current_app.config[CONFIG_USER_UPLOAD_ENABLED]:
-            try:
-                user_oid = auth_claims["oid"]
-                user_blob_container_client = current_app.config[CONFIG_USER_BLOB_CONTAINER_CLIENT]
-                user_directory_client: FileSystemClient = user_blob_container_client.get_directory_client(user_oid)
-                file_client = user_directory_client.get_file_client(path)
-                blob = await file_client.download_file()
-            except ResourceNotFoundError:
-                current_app.logger.exception("Path not found in DataLake: %s", path)
-                abort(404)
-        else:
-            abort(404)
-    if not blob.properties or not blob.properties.has_key("content_settings"):
-        abort(404)
-    mime_type = blob.properties["content_settings"]["content_type"]
-    if mime_type == "application/octet-stream":
-        mime_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
-    blob_file = io.BytesIO()
-    await blob.readinto(blob_file)
-    blob_file.seek(0)
-    return await send_file(blob_file, mimetype=mime_type, as_attachment=False, attachment_filename=path)
+# @bp.route("/content/<path>")
+# @authenticated_path
+# async def content_file(path: str, auth_claims: Dict[str, Any]):
+#     """
+#     Serve content files from blob storage from within the app to keep the example self-contained.
+#     *** NOTE *** if you are using app services authentication, this route will return unauthorized to all users that are not logged in
+#     if AZURE_ENFORCE_ACCESS_CONTROL is not set or false, logged in users can access all files regardless of access control
+#     if AZURE_ENFORCE_ACCESS_CONTROL is set to true, logged in users can only access files they have access to
+#     This is also slow and memory hungry.
+#     """
+#     # Remove page number from path, filename-1.txt -> filename.txt
+#     # This shouldn't typically be necessary as browsers don't send hash fragments to servers
+#     if path.find("#page=") > 0:
+#         path_parts = path.rsplit("#page=", 1)
+#         path = path_parts[0]
+#     current_app.logger.info("Opening file %s", path)
+#     blob_container_client: ContainerClient = current_app.config[CONFIG_BLOB_CONTAINER_CLIENT]
+#     blob: Union[BlobDownloader, DatalakeDownloader]
+#     try:
+#         blob = await blob_container_client.get_blob_client(path).download_blob()
+#     except ResourceNotFoundError:
+#         current_app.logger.info("Path not found in general Blob container: %s", path)
+#         if current_app.config[CONFIG_USER_UPLOAD_ENABLED]:
+#             try:
+#                 user_oid = auth_claims["oid"]
+#                 user_blob_container_client = current_app.config[CONFIG_USER_BLOB_CONTAINER_CLIENT]
+#                 user_directory_client: FileSystemClient = user_blob_container_client.get_directory_client(user_oid)
+#                 file_client = user_directory_client.get_file_client(path)
+#                 blob = await file_client.download_file()
+#             except ResourceNotFoundError:
+#                 current_app.logger.exception("Path not found in DataLake: %s", path)
+#                 abort(404)
+#         else:
+#             abort(404)
+#     if not blob.properties or not blob.properties.has_key("content_settings"):
+#         abort(404)
+#     mime_type = blob.properties["content_settings"]["content_type"]
+#     if mime_type == "application/octet-stream":
+#         mime_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+#     blob_file = io.BytesIO()
+#     await blob.readinto(blob_file)
+#     blob_file.seek(0)
+#     return await send_file(blob_file, mimetype=mime_type, as_attachment=False, attachment_filename=path)
 
 
 @bp.route("/ask", methods=["POST"])
@@ -365,6 +372,163 @@ async def speech():
     except Exception as e:
         current_app.logger.exception("Exception in /speech")
         return jsonify({"error": str(e)}), 500
+    
+@bp.route("/content/<service>/<file_name>")
+async def content_file(service, file_name):
+    if not service or not file_name:
+        abort(400, "Both 'service' and 'path' are required.")
+
+    # Get container, index
+    service_accessories = await get_service_accessories(service)
+
+    if service_accessories:
+        _, azure_storage_container, _, _ = service_accessories
+    else:
+        return jsonify({"error": "unknown service"}), 400
+    
+    try:
+        blob_container_client = get_blob_container_client(azure_storage_container)
+        blob = await blob_container_client.get_blob_client(file_name).download_blob()
+        if not blob.properties or not blob.properties.has_key("content_settings"):
+            abort(404)
+        mime_type = blob.properties["content_settings"]["content_type"]
+        if mime_type == "application/octet-stream":
+            mime_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+        blob_file = io.BytesIO()
+        await blob.readinto(blob_file)
+        blob_file.seek(0)
+        return await send_file(blob_file, mimetype=mime_type, as_attachment=False, attachment_filename=file_name)
+    except Exception as e:
+        logging.exception(f"Exception in /content: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+    
+@bp.route('/store_feedback', methods=['POST'])
+async def store_feedback():
+    if not request.is_json:
+        return jsonify({"error": "request must be json"}), 415
+
+    data = await request.get_json()
+    service = data.get('service')
+    user_name = data.get('user_name')
+    feedback_flag = data.get('feedback_flag')
+    feedback = data.get('feedback')
+    chat_history = data.get('chat_history')
+    is_deleted = data.get('is_deleted')
+
+    try:
+        # Insert feedback entity into the storage
+        result = await upsert_feedback_entity(service, user_name, feedback_flag, feedback, chat_history, is_deleted)
+        return jsonify(result), 201
+    except Exception as e:
+        logging.exception(f"Exception in /store_feedback: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@bp.route('/store_api_configuration', methods=['POST'])
+async def store_api_configuration():
+    if not request.is_json:
+        return jsonify({"error": "request must be json"}), 415
+
+    data = await request.get_json()
+    key = data.get('key')
+    value = data.get('value')
+
+    try:
+        # Insert prompt entity into the storage
+        result = await upsert_api_configuration(key, value)
+        return jsonify(result), 201
+    except Exception as e:
+        logging.exception(f"Exception in /store_api_configuration: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+    
+@bp.route('/get_api_configuration', methods=['GET'])
+async def get_api_configurations():
+    try:
+        result = await get_api_configuration()
+        return jsonify(result),  200
+    except Exception as e:
+        logging.exception(f"Exception in /get_api_configuration: {str(e)}")
+        return jsonify({"error": "An unexpected error occurred while processing the request.", "details": str(e)})
+
+@bp.route('/delete_api_configuration', methods=['DELETE'])
+async def delete_api_configurations():
+    try:
+        data = await request.get_json()
+        key = data.get('key')
+
+        if not key:
+            return jsonify({"error": "Missing 'key' parameter in the request."})
+
+        result = await delete_api_configuration(key)
+        return '', 204
+    
+    except Exception as e:
+        logging.exception(f"Exception in /delete_api_configuration: {str(e)}")
+        return jsonify({"error": "An unexpected error occurred while processing the request.", "details": str(e)})
+    
+@bp.route('/store_prompt', methods=['POST'])
+async def store_prompt():
+    if not request.is_json:
+        return jsonify({"error": "request must be json"}), 415
+
+    data = await request.get_json()
+    service = data.get('service')
+    user_intent_classifier_prompt = data.get('user_intent_classifier_prompt')
+    document_rag_prompt = data.get('document_rag_prompt')
+    sql_agent_prompt = data.get('sql_agent_prompt')
+
+    try:
+        # Insert prompt entity into the storage
+        result = await upsert_prompt_entity(service, user_intent_classifier_prompt, document_rag_prompt, sql_agent_prompt)
+        return jsonify(result), 201
+    except Exception as e:
+        logging.exception(f"Exception in /store_prompt: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/get_prompt', methods=['POST'])
+async def get_prompt():
+    if not request.is_json:
+        return jsonify({"error": "request must be json"}), 415
+    search_criteria = await request.get_json()
+   
+    try:
+        # Retrieve feedback entries from the Azure table
+        prompt = await get_prompt_entity(search_criteria)
+
+        return jsonify(prompt), 200
+
+    except Exception as e:
+        logging.exception(f"Exception in /get_prompt: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+    
+@bp.route('/get_feedback', methods=['POST'])
+async def get_feedback():
+    if not request.is_json:
+        return jsonify({"error": "request must be json"}), 415
+    search_criteria = await request.get_json()
+   
+    try:
+        # Retrieve feedback entries from the Azure table
+        feedbacks = await get_feedback_entries(search_criteria)
+
+        return jsonify(feedbacks), 200
+
+    except Exception as e:
+        logging.exception(f"Exception in /get_feedback: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+    
+@bp.route('/get_services', methods=['GET'])
+async def get_services():
+    try:
+        # Fetch services and parse JSON
+        services = json.loads(os.getenv('SERVICES', '[]').replace('\\', ''))
+        return jsonify(services)
+
+    except Exception as e:
+        error_message = "An error occurred while loading services."
+        logging.exception(f"Exception in /get_services: {str(e)}") 
+        return jsonify({"error": error_message}), 500
+
     
 @bp.route('/delist_files', methods=['POST'])
 async def delist_files():
