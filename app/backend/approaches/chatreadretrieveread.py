@@ -15,6 +15,7 @@ from approaches.approach import ThoughtStep
 from approaches.chatapproach import ChatApproach
 from approaches.promptmanager import PromptManager
 from core.authentication import AuthenticationHelper
+import os
 
 
 class ChatReadRetrieveReadApproach(ChatApproach):
@@ -65,6 +66,8 @@ class ChatReadRetrieveReadApproach(ChatApproach):
         messages: list[ChatCompletionMessageParam],
         overrides: dict[str, Any],
         auth_claims: dict[str, Any],
+        azure_storage_container, 
+        service_prompt,
         should_stream: Literal[False],
     ) -> tuple[dict[str, Any], Coroutine[Any, Any, ChatCompletion]]: ...
 
@@ -74,6 +77,8 @@ class ChatReadRetrieveReadApproach(ChatApproach):
         messages: list[ChatCompletionMessageParam],
         overrides: dict[str, Any],
         auth_claims: dict[str, Any],
+        azure_storage_container, 
+        service_prompt,
         should_stream: Literal[True],
     ) -> tuple[dict[str, Any], Coroutine[Any, Any, AsyncStream[ChatCompletionChunk]]]: ...
 
@@ -82,8 +87,11 @@ class ChatReadRetrieveReadApproach(ChatApproach):
         messages: list[ChatCompletionMessageParam],
         overrides: dict[str, Any],
         auth_claims: dict[str, Any],
+        azure_storage_container,
+        service_prompt,
         should_stream: bool = False,
     ) -> tuple[dict[str, Any], Coroutine[Any, Any, Union[ChatCompletion, AsyncStream[ChatCompletionChunk]]]]:
+        
         seed = overrides.get("seed", None)
         use_text_search = overrides.get("retrieval_mode") in ["text", "hybrid", None]
         use_vector_search = overrides.get("retrieval_mode") in ["vectors", "hybrid", None]
@@ -151,9 +159,24 @@ class ChatReadRetrieveReadApproach(ChatApproach):
 
         # STEP 3: Generate a contextual and content specific answer using the search results and chat history
         text_sources = self.get_sources_content(results, use_semantic_captions, use_image_citation=False)
+        # rendered_answer_prompt = self.prompt_manager.render_prompt(
+        #     self.answer_prompt,
+        #     self.get_system_prompt_variables(overrides.get("prompt_template"))
+        #     | {
+        #         "include_follow_up_questions": bool(overrides.get("suggest_followup_questions")),
+        #         "past_messages": messages[:-1],
+        #         "user_query": original_user_query,
+        #         "text_sources": text_sources,
+        #     },
+        # )
+
+        prompt_override = overrides.get("prompt_template")
+        # if service_prompt:
+        #     prompt_override = service_prompt
+
         rendered_answer_prompt = self.prompt_manager.render_prompt(
             self.answer_prompt,
-            self.get_system_prompt_variables(overrides.get("prompt_template"))
+            self.get_system_prompt_variables(prompt_override)
             | {
                 "include_follow_up_questions": bool(overrides.get("suggest_followup_questions")),
                 "past_messages": messages[:-1],
@@ -171,9 +194,18 @@ class ChatReadRetrieveReadApproach(ChatApproach):
             max_tokens=self.chatgpt_token_limit - response_token_limit,
             fallback_to_default=self.ALLOW_NON_GPT_MODELS,
         )
+    
+        AZURE_STORAGE_ACCOUNT = os.environ["AZURE_STORAGE_ACCOUNT"]
+        datapoints = [
+            {
+                "filename": f.split(":", 1)[0],
+                "filelocation": f"https://{AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/{azure_storage_container}/{f.split(':', 1)[0]}"
+            }
+              for f in text_sources if ":" in f
+        ]
 
         extra_info = {
-            "data_points": {"text": text_sources},
+            "data_points": datapoints,
             "thoughts": [
                 ThoughtStep(
                     "Prompt to generate search query",

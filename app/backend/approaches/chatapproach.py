@@ -6,14 +6,14 @@ from typing import Any, AsyncGenerator, Optional
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 
 from approaches.approach import Approach
-
+import os 
 
 class ChatApproach(Approach, ABC):
 
     NO_RESPONSE = "0"
 
     @abstractmethod
-    async def run_until_final_call(self, messages, overrides, auth_claims, should_stream) -> tuple:
+    async def run_until_final_call(self, messages, overrides, auth_claims, azure_storage_container, service_prompt, should_stream) -> tuple:
         pass
 
     def get_search_query(self, chat_completion: ChatCompletion, user_query: str):
@@ -43,24 +43,33 @@ class ChatApproach(Approach, ABC):
         self,
         messages: list[ChatCompletionMessageParam],
         overrides: dict[str, Any],
+        azure_storage_container,
+        service_prompt: str, 
         auth_claims: dict[str, Any],
         session_state: Any = None,
     ) -> dict[str, Any]:
         extra_info, chat_coroutine = await self.run_until_final_call(
-            messages, overrides, auth_claims, should_stream=False
+            messages, overrides, auth_claims, azure_storage_container,
+        service_prompt, should_stream=False
         )
         chat_completion_response: ChatCompletion = await chat_coroutine
         content = chat_completion_response.choices[0].message.content
-        role = chat_completion_response.choices[0].message.role
-        if overrides.get("suggest_followup_questions"):
-            content, followup_questions = self.extract_followup_questions(content)
-            extra_info["followup_questions"] = followup_questions
-        chat_app_response = {
-            "message": {"content": content, "role": role},
-            "context": extra_info,
-            "session_state": session_state,
-        }
-        return chat_app_response
+        reference_file_names = [item['filename'] for item in extra_info['data_points']]
+        print(f"Content:::{content}")
+         # Remove FAQs Extract references from the chat content
+        chat_content = re.sub(r'\[[^\]]*FAQs[^\]]*\]', '', content)
+        references = list(set(re.findall(r'\[([^\]]+)\]', chat_content)))
+        print(f"references:::::::{references}")
+        
+        # Create data points with Azure Storage URLs
+        AZURE_STORAGE_ACCOUNT = os.environ["AZURE_STORAGE_ACCOUNT"]
+        data_points = [{"filelocation":  f"https://{AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/{azure_storage_container}/{reference}", "filename": reference} for reference in references if reference in reference_file_names]
+        
+        # # Update extra_info with data_points and the original chat answer
+        extra_info = {"data_points": data_points, "answer": chat_content}
+        
+        return extra_info
+
 
     async def run_with_streaming(
         self,

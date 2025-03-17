@@ -8,15 +8,20 @@ import asyncio
 import re
 
 def extract_filenames(stdout_lines):
-    pattern = r"Ingesting '(.+?)'"  # Regex to match file names
-    filenames = []  # List to store all filenames
+    pattern = r"Filename processed: (.+?), Status: (True|False)(?:, Error: (.+))?"  # Regex to match filename and status
+    processed_files = []
     
     for line in stdout_lines:
         match = re.search(pattern, line)
         if match:
-            filenames.append(match.group(1))  # Add each filename to the list
+            filename = match.group(1)
+            status = match.group(2) == "True"  # Convert status to boolean
+            processed_files.append([filename, status])
+    
+    return {
+        "processed_files": processed_files
+    }
 
-    return filenames  # Return the complete list
 
 async def run_command(command):
     try:

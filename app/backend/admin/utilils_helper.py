@@ -202,7 +202,6 @@ async def remove_index_blob(search_client, blob_container, filename):
 def get_config_chat_approaches(azure_search_index):
     # Get the stored chat approach instance
     chat_approach = current_app.config.get(CONFIG_CHAT_APPROACH)
-    
     if not chat_approach:
         raise ValueError("Chat approach is not initialized in current_app.config")
 

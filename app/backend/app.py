@@ -630,7 +630,6 @@ async def process():
            
             processed_files = await prepdocs_processor(temp_files_dir, azure_storage_container, azure_search_index, max_depth, url)
             
-            print("FILES PROCESSED SUCCESSFULLY AND NOW I AM IN ENDPOINT FILE...........")
             for processed_file in processed_files:
                 # if processed_file[1]: #TODO: only save entry for successfully files - rollback unsuccesful files from storage
                 file_entry = {"file": processed_file[0]}
@@ -639,7 +638,7 @@ async def process():
             # Clean up and respond with success
             shutil.rmtree(temp_files_dir)
             return jsonify({"message": "Files processed successfully",
-                            "processed_files": processed_files})
+                            "processed_files": processed_files["processed_files"]})
 
         except Exception as e:
             # Handle exceptions that occur during file processing
@@ -666,7 +665,6 @@ async def chat():
 
     # Get index, blob & prompt
     service_accessories = await get_service_accessories(service)
-
     if service_accessories:
         azure_search_index, azure_storage_container, service_prompt, use_external_source = service_accessories
         service_prompt = optional_prompt if optional_prompt else service_prompt
@@ -678,9 +676,9 @@ async def chat():
         impl = get_config_chat_approaches(azure_search_index).get(approach)
         if not impl:
             return jsonify({"error": "unknown approach"}), 400
-        r = await impl.run_without_streaming(request_json["chat_history"], request_json.get("overrides", {}), user_info)
-        print(f"Response:::::::::{r}")
-        chat_entry = [{"user": chat_history[-1]["content"]}, {"bot": r['message']['content']}]
+        r = await impl.run_without_streaming(request_json["chat_history"], request_json.get("overrides", {}), azure_storage_container, service_prompt, user_info)
+        print(r)
+        chat_entry = [{"user": chat_history[-1]["content"]}, {"bot": {"bot": r['answer']}}]
         # Strore chat logs
         await upsert_chatlog_entity(service, user_name, api_function, chat_entry, is_deleted)
         

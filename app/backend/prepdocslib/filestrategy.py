@@ -106,6 +106,10 @@ class FileStrategy(Strategy):
                             blob_image_embeddings = await self.image_embeddings.create_embeddings(blob_sas_uris)
 
                         await search_manager.update_content(sections, blob_image_embeddings, url=file.url)
+                        print(f"Filename processed: {file.filename()}, Status: True")
+
+                except Exception as e:
+                    print(f"Filename processed: {file.filename()}, Status: False, Error: {e}")
                 finally:
                     if file:
                         file.close()
