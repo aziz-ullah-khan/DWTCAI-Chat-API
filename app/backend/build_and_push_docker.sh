@@ -1,0 +1,1 @@
+az acr build --registry dwtcai --image dwtcai-chat-api:v1 .

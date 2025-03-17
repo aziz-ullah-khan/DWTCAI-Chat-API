@@ -104,7 +104,9 @@ from admin.utilils_helper import (
     get_blob_container_client,
     get_search_client,
     remove_index_blob,
-    get_config_chat_approaches
+    get_config_chat_approaches,
+    load_environment_variables,
+    load_table_environment_variables
 
 )
 from admin.table_storage import (
@@ -116,7 +118,8 @@ from admin.table_storage import (
     delete_api_configuration,
     upsert_prompt_entity,
     get_prompt_entity,
-    get_feedback_entries
+    get_feedback_entries,
+    get_chatlogs
 )
 import tempfile
 
@@ -529,7 +532,23 @@ async def get_services():
         logging.exception(f"Exception in /get_services: {str(e)}") 
         return jsonify({"error": error_message}), 500
 
-    
+
+@bp.route('/get_chatlogs', methods=['POST'])
+async def chatlogs():
+    if not request.is_json:
+        return jsonify({"error": "request must be json"}), 415
+    search_criteria = await request.get_json()
+   
+    try:
+        # Retrieve feedback entries from the Azure table
+        chat_logs = await get_chatlogs(search_criteria)
+
+        return jsonify(chat_logs), 200
+
+    except Exception as e:
+        logging.exception(f"Exception in /get_chatlogs: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+     
 @bp.route('/delist_files', methods=['POST'])
 async def delist_files():
     if not request.is_json:
@@ -729,6 +748,11 @@ async def list_uploaded(auth_claims: dict[str, Any]):
             current_app.logger.exception("Error listing uploaded files", error)
     return jsonify(files), 200
 
+@bp.before_request
+async def ensure_openai_token_and_other_config():
+    # load environment variable from app config and azure table - TODO: Optimize these
+    await load_environment_variables()
+    await load_table_environment_variables()
 
 @bp.before_app_serving
 async def setup_clients():

@@ -204,6 +204,70 @@ async def upsert_chatlog_entity(selected_service, user_name, api_function, chat_
     # Insert or update the entity
     table_client.upsert_entity(entity=entity)
 
+
+async def get_chatlogs(search_criteria):
+    try:
+        table_client = current_app.config[CONFIG_TABLE_SERVICE_CLIENT].create_table_if_not_exists(CHATLOG_TABLE)
+
+        start_date = search_criteria.get('start_date', None)
+        end_date = search_criteria.get('end_date', None)
+        service = search_criteria.get('service', None)
+        api_function = search_criteria.get('api_function', None)
+        is_deleted = search_criteria.get('is_deleted', 0)
+        user_name = search_criteria.get('user_name', None)
+        top = search_criteria.pop('top', None)
+
+        key_mapping = {
+                        "user_name": "UserName",
+                        "is_deleted": "IsDeleted",
+                        "api_function": "ApiFunction"
+                        }
+        for old_key, new_key in key_mapping.items():
+            if old_key in search_criteria:
+                search_criteria[new_key] = search_criteria.pop(old_key)
+                
+        query_filters = []
+        for key, value in search_criteria.items():
+            if key not in ['start_date', 'end_date', 'service']:
+                if isinstance(value, int):
+                    query_filters.append(f"{key} eq {value}")
+                else:
+                    query_filters.append(f"{key} eq '{value}'")
+
+        if start_date:
+            query_filters.append(f"Timestamp ge datetime'{start_date}'")
+        if end_date:
+            query_filters.append(f"Timestamp le datetime'{end_date}'")
+
+        if service:
+            query_filters.append(f"PartitionKey eq '{service}'")
+        query_filter = " and ".join(query_filters)
+        # Retrieve entities from the Azure table
+        entities = table_client.query_entities(query_filter=query_filter)
+        entities = sorted(entities, key=lambda x: x._metadata["timestamp"], reverse=True) # TODO: optimization
+
+        if top:
+            entities = entities[:top]
+
+        entry_list = []
+        for entity in entities:
+            entry = {
+                'RowKey': entity['RowKey'],
+                'TimeStamp': entity._metadata["timestamp"],
+                'UserName': entity.get('UserName', ''),
+                'ApiFunction': entity['ApiFunction'],
+                'ChatHistory': json.loads(entity['ChatHistory']),
+                'IsDeleted': entity['IsDeleted']
+            }
+            entry_list.append(entry)
+
+        return entry_list
+
+    except Exception as e:
+        error_message = "An error occurred while retrieving chatlog."
+        logging.exception(error_message)
+        return {"error": error_message, "details": str(e)}
+    
 async def get_prompt_entity(search_criteria):
     try:
         table_client = current_app.config[CONFIG_TABLE_SERVICE_CLIENT].create_table_if_not_exists(PROMPT_TABLE)

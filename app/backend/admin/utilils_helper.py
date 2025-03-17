@@ -3,7 +3,7 @@ import os
 import asyncio
 import shutil
 import subprocess
-from admin.table_storage import get_prompt_entity
+from admin.table_storage import get_prompt_entity, get_api_configuration
 from azure.identity.aio import DefaultAzureCredential
 from azure.search.documents.aio import SearchClient
 from azure.core.credentials import AzureKeyCredential
@@ -11,22 +11,40 @@ from azure.storage.blob.aio import BlobServiceClient
 from approaches.chatreadretrieveread import ChatReadRetrieveReadApproach
 import logging, re
 from quart import current_app
+from dotenv import load_dotenv
 
 
 CONFIG_CHAT_APPROACH = "chat_approach"
 CONFIG_OPENAI_CLIENT = "openai_client"
 
-AZURE_AI_SERVICE = os.environ["AZURE_AI_SERVICE"]
-AZURE_AI_API_KEY = os.environ["AZURE_AI_API_KEY"]
+# AZURE_AI_SERVICE = os.environ["AZURE_AI_SERVICE"]
+# AZURE_AI_API_KEY = os.environ["AZURE_AI_API_KEY"]
 AZURE_STORAGE_ACCOUNT = os.environ["AZURE_STORAGE_ACCOUNT"] 
 AZURE_STORAGE_KEY = os.environ.get("AZURE_STORAGE_KEY")
 AZURE_SEARCH_KEY = os.environ.get("AZURE_SEARCH_KEY")
 AZURE_SEARCH_SERVICE = os.environ["AZURE_SEARCH_SERVICE"]
-AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ["AZURE_OPENAI_CHATGPT_DEPLOYMENT"]
-AZURE_OPENAI_CHATGPT_MODEL = os.environ["AZURE_OPENAI_CHATGPT_MODEL"]
-AZURE_OPENAI_EMB_DEPLOYMENT = os.environ["AZURE_OPENAI_EMB_DEPLOYMENT"]
-KB_FIELDS_CONTENT = os.getenv("KB_FIELDS_CONTENT", "content")
-KB_FIELDS_SOURCEPAGE = os.getenv("KB_FIELDS_SOURCEPAGE", "sourcepage")
+# AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ["AZURE_OPENAI_CHATGPT_DEPLOYMENT"]
+# AZURE_OPENAI_CHATGPT_MODEL = os.environ["AZURE_OPENAI_CHATGPT_MODEL"]
+# AZURE_OPENAI_EMB_DEPLOYMENT = os.environ["AZURE_OPENAI_EMB_DEPLOYMENT"]
+# KB_FIELDS_CONTENT = os.getenv("KB_FIELDS_CONTENT", "content")
+# KB_FIELDS_SOURCEPAGE = os.getenv("KB_FIELDS_SOURCEPAGE", "sourcepage")
+
+async def load_environment_variables():
+    load_dotenv()
+
+async def load_table_environment_variables():
+    try:
+        api_config = await get_api_configuration()
+
+        # Setting environment variables
+        for key, value in api_config.items():
+            if key=="SERVICES":
+                os.environ[key] = value
+
+    except json.JSONDecodeError as e:
+        print(f"Error decoding JSON: {e}")
+    except Exception as e:
+        print(f"Error setting table environment variables: {e}")
 
 async def install_sudo():
     try:
