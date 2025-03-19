@@ -194,15 +194,16 @@ class ChatReadRetrieveReadApproach(ChatApproach):
             max_tokens=self.chatgpt_token_limit - response_token_limit,
             fallback_to_default=self.ALLOW_NON_GPT_MODELS,
         )
-    
-        AZURE_STORAGE_ACCOUNT = os.environ["AZURE_STORAGE_ACCOUNT"]
+
         datapoints = [
-            {
-                "filename": f.split(":", 1)[0],
-                "filelocation": f"https://{AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/{azure_storage_container}/{f.split(':', 1)[0]}"
-            }
-              for f in text_sources if ":" in f
+        {
+            "filename": f.get("filename", "").strip(),
+            "filecontent": f.get("content", "").strip(),
+            "sourcefile": f.get("sourcefile", "").strip()
+        }
+        for f in text_sources  # Iterate through JSON objects
         ]
+
 
         extra_info = {
             "data_points": datapoints,

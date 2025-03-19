@@ -206,21 +206,27 @@ class Approach(ABC):
 
     def get_sources_content(
         self, results: List[Document], use_semantic_captions: bool, use_image_citation: bool
-    ) -> list[str]:
+    ) -> list[dict]:
 
         def nonewlines(s: str) -> str:
             return s.replace("\n", " ").replace("\r", " ")
 
         if use_semantic_captions:
             return [
-                (self.get_citation((doc.sourcepage or ""), use_image_citation))
-                + ": "
-                + nonewlines(" . ".join([cast(str, c.text) for c in (doc.captions or [])]))
+                {
+                    "filename": self.get_citation((doc.sourcepage or ""), use_image_citation),
+                    "content": nonewlines(" . ".join([cast(str, c.text) for c in (doc.captions or [])])),
+                    "sourcefile": doc.sourcefile or ""
+                }
                 for doc in results
             ]
         else:
             return [
-                (self.get_citation((doc.sourcepage or ""), use_image_citation)) + ": " + nonewlines(doc.content or "")
+                {
+                    "filename": self.get_citation((doc.sourcepage or ""), use_image_citation),
+                    "content": nonewlines(doc.content or ""),
+                    "sourcefile": doc.sourcefile or ""
+                }
                 for doc in results
             ]
 

@@ -314,6 +314,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--container", required=False, help="Optional. Specify the Azure Blob Storage container instead of using the default from environment variables")
     parser.add_argument("--index", required=False, help="Optional. Specify the Azure Search index name instead of using the default from environment variables")
+    parser.add_argument("--url", required=False, help="Optional. url to process ")
+    parser.add_argument("--max_depth", required=False, help="Optional. max depth for scraping")
     
     args = parser.parse_args()
 
@@ -456,6 +458,9 @@ if __name__ == "__main__":
             category=args.category,
             use_content_understanding=use_content_understanding,
             content_understanding_endpoint=os.getenv("AZURE_CONTENTUNDERSTANDING_ENDPOINT"),
+            url=args.url,
+            max_depth=args.max_depth
+
         )
 
     

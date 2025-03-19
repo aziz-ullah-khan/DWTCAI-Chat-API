@@ -70,7 +70,7 @@ async def prepdocs_processor(files_dir, container, index, max_depth, url=None):
     print('Running "prepdocs.py"')
 
     if url:
-        command = f'python ./prepdocs.py "{url}" --url --max_depth {max_depth} --storagekey "$AZURE_STORAGE_KEY" --container "{container}" --searchservice "$AZURE_SEARCH_SERVICE" --searchkey "$AZURE_SEARCH_KEY" --index "{index}" -v'
+        command = f'python ./prepdocs.py "{url}" --url "{url}" --max_depth {max_depth} --storagekey "$AZURE_STORAGE_KEY" --container "{container}" --searchservice "$AZURE_SEARCH_SERVICE" --searchkey "$AZURE_SEARCH_KEY" --index "{index}" -v'
         stdout_lines = await run_command(command)
     else:
         command = f'python ./prepdocs.py "{files_dir}/*"  --storagekey "$AZURE_STORAGE_KEY" --container "{container}" --searchservice "$AZURE_SEARCH_SERVICE" --searchkey "$AZURE_SEARCH_KEY" --index "{index}" -v'

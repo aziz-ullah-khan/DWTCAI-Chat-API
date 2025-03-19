@@ -10,6 +10,11 @@ from .listfilestrategy import File, ListFileStrategy
 from .mediadescriber import ContentUnderstandingDescriber
 from .searchmanager import SearchManager, Section
 from .strategy import DocumentAction, SearchInfo, Strategy
+from bs4 import BeautifulSoup as Soup
+from langchain_community.document_loaders.recursive_url_loader import RecursiveUrlLoader
+import io
+import re
+
 
 logger = logging.getLogger("scripts")
 
@@ -35,6 +40,48 @@ async def parse_file(
     ]
     return sections
 
+def process_url(url, max_depth):
+    loader = RecursiveUrlLoader(
+        url=url, max_depth=max_depth, extractor=lambda x: Soup(x, "html.parser").text
+    )
+    docs = loader.load()
+    return docs
+
+def sanitize_filename(url: str) -> str:
+    """Convert a URL into a safe filename."""
+    return re.sub(r'[\\/*?:"<>|]', "_", url)
+
+
+async def parse_url(
+    url: str,
+    max_depth : int,
+    file_processors: dict[str, FileProcessor],
+    category: Optional[str] = None,
+    image_embeddings: Optional[ImageEmbeddings] = None,
+) -> List[Section]:
+     
+    processor = file_processors.get(".txt")
+    if processor is None:
+        logger.info("Skipping '%s', no parser found.", )
+        return []
+    logger.info("Ingesting '%s'", url)
+
+    docs = process_url(url, max_depth)
+    if not docs:
+        logger.warning("No content extracted from '%s'.", url)
+        return []
+    
+    full_text = "\n\n".join([doc.page_content for doc in docs])
+
+    file_path = sanitize_filename(url)
+    file = File(content=io.StringIO(full_text))
+    file.content.name = file_path
+    pages = [page async for page in processor.parser.parse(content=io.BytesIO(full_text.encode("utf-8")))]
+    logger.warning("Each page will be split into smaller chunks of text, but images will be of the entire page.")
+    sections = [
+        Section(split_page, content=file, category=category) for split_page in processor.splitter.split_pages(pages)
+    ]
+    return sections, file
 
 class FileStrategy(Strategy):
     """
@@ -55,6 +102,8 @@ class FileStrategy(Strategy):
         category: Optional[str] = None,
         use_content_understanding: bool = False,
         content_understanding_endpoint: Optional[str] = None,
+        url: Optional[str] = None,
+        max_depth: Optional[int] = None
     ):
         self.list_file_strategy = list_file_strategy
         self.blob_manager = blob_manager
@@ -68,6 +117,8 @@ class FileStrategy(Strategy):
         self.category = category
         self.use_content_understanding = use_content_understanding
         self.content_understanding_endpoint = content_understanding_endpoint
+        self.url = url
+        self.max_depth = int(max_depth) if max_depth is not None else 0
 
     async def setup(self):
         search_manager = SearchManager(
@@ -95,8 +146,24 @@ class FileStrategy(Strategy):
             self.search_info, self.search_analyzer_name, self.use_acls, False, self.embeddings
         )
         if self.document_action == DocumentAction.Add:
+            if self.url:
+                try:
+                    sections, file= await parse_url(self.url, self.max_depth, self.file_processors, self.category, self.image_embeddings)
+                    if sections:
+                        # blob_sas_uris = await self.blob_manager.upload_blob(file)
+                        blob_image_embeddings: Optional[List[List[float]]] = None
+                        if self.image_embeddings and blob_sas_uris:
+                            blob_image_embeddings = await self.image_embeddings.create_embeddings(blob_sas_uris)
+                        await search_manager.update_content(sections, blob_image_embeddings, url=file.url, source_website_url=self.url)
+                        print(f"Filename processed: {self.url}, Status: True")
+
+                except Exception as e:
+                    print(f"Filename processed: {self.url}, Status: False, Error: {e}")
+
+
             files = self.list_file_strategy.list()
             async for file in files:
+               
                 try:
                     sections = await parse_file(file, self.file_processors, self.category, self.image_embeddings)
                     if sections:

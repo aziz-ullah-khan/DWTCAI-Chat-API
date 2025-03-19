@@ -166,6 +166,9 @@ class BlobManager:
     def sourcepage_from_file_page(cls, filename, page=0) -> str:
         if os.path.splitext(filename)[1].lower() == ".pdf":
             return f"{os.path.basename(filename)}#page={page+1}"
+        
+        elif filename.startswith("http"):
+            return filename
         else:
             return os.path.basename(filename)
 

@@ -253,7 +253,7 @@ class SearchManager:
                         )
 
     async def update_content(
-        self, sections: List[Section], image_embeddings: Optional[List[List[float]]] = None, url: Optional[str] = None
+        self, sections: List[Section], image_embeddings: Optional[List[List[float]]] = None, url: Optional[str] = None, source_website_url: Optional[str] = None
     ):
         MAX_BATCH_SIZE = 1000
         section_batches = [sections[i : i + MAX_BATCH_SIZE] for i in range(0, len(sections), MAX_BATCH_SIZE)]
@@ -267,16 +267,16 @@ class SearchManager:
                         "category": section.category,
                         "sourcepage": (
                             BlobManager.blob_image_name_from_file_page(
-                                filename=section.content.filename(),
+                                filename=source_website_url if source_website_url else section.content.filename(),
                                 page=section.split_page.page_num,
                             )
                             if image_embeddings
                             else BlobManager.sourcepage_from_file_page(
-                                filename=section.content.filename(),
+                                filename=source_website_url if source_website_url else section.content.filename(),
                                 page=section.split_page.page_num,
                             )
                         ),
-                        "sourcefile": section.content.filename(),
+                        "sourcefile": source_website_url if source_website_url else section.content.filename(),
                         **section.content.acls,
                     }
                     for section_index, section in enumerate(batch)

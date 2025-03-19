@@ -55,18 +55,11 @@ class ChatApproach(Approach, ABC):
         chat_completion_response: ChatCompletion = await chat_coroutine
         content = chat_completion_response.choices[0].message.content
         reference_file_names = [item['filename'] for item in extra_info['data_points']]
-        print(f"Content:::{content}")
          # Remove FAQs Extract references from the chat content
         chat_content = re.sub(r'\[[^\]]*FAQs[^\]]*\]', '', content)
         references = list(set(re.findall(r'\[([^\]]+)\]', chat_content)))
-        print(f"references:::::::{references}")
-        
-        # Create data points with Azure Storage URLs
-        AZURE_STORAGE_ACCOUNT = os.environ["AZURE_STORAGE_ACCOUNT"]
-        data_points = [{"filelocation":  f"https://{AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/{azure_storage_container}/{reference}", "filename": reference} for reference in references if reference in reference_file_names]
-        
         # # Update extra_info with data_points and the original chat answer
-        extra_info = {"data_points": data_points, "answer": chat_content}
+        extra_info = {"data_points": references, "answer": chat_content}
         
         return extra_info
 
