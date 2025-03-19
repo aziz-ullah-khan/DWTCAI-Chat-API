@@ -466,3 +466,6 @@ zipp==3.21.0
 # The following packages are considered to be unsafe in a requirements file:
 # setuptools
 azure-data-tables==12.6.0
+
+
+langchain_community
