@@ -390,6 +390,10 @@ async def content_file(service, file_name):
         return jsonify({"error": "unknown service"}), 400
     
     try:
+        if file_name.find("#page=") > 0:
+            file_parts = file_name.rsplit("#page=", 1)
+            file_name = file_parts[0]
+
         blob_container_client = get_blob_container_client(azure_storage_container)
         blob = await blob_container_client.get_blob_client(file_name).download_blob()
         if not blob.properties or not blob.properties.has_key("content_settings"):
