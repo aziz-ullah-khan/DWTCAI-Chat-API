@@ -181,9 +181,10 @@ async def upsert_chatlog_entity(selected_service, user_name, api_function, chat_
     unique_id = str(uuid.uuid4())
     timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
 
+    row_key = f'{timestamp}_{unique_id}'
     entity = {
         'PartitionKey': selected_service,
-        'RowKey': f'{timestamp}_{unique_id}',
+        'RowKey': row_key,
         'UserName': user_name,
         'ApiFunction': api_function,
         'ChatHistory': json.dumps(chat_history),

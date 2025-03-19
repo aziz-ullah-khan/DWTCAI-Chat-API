@@ -204,7 +204,7 @@ class ChatReadRetrieveReadApproach(ChatApproach):
         for f in text_sources  # Iterate through JSON objects
         ]
 
-
+     
         extra_info = {
             "data_points": datapoints,
             "thoughts": [

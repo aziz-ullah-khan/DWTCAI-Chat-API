@@ -177,8 +177,12 @@ async def remove_index_blob(search_client, blob_container, filename):
         if filename:
             # remove index
             while True:
-                if is_valid_file_name(filename):
-                    filename = os.path.basename(filename)
+                if filename.startswith("http"):
+                    print(f"Processing URL-based filename: {filename}")
+
+                else:
+                    if is_valid_file_name(filename):
+                        filename = os.path.basename(filename)
                 filter = None if filename is None else f"sourcefile eq '{filename}'"
                 r = await search_client.search("", filter=filter, top=1000, include_total_count=True)
                 doc_to_delete = [{ "id": d["id"] } async for d in r]
@@ -189,11 +193,14 @@ async def remove_index_blob(search_client, blob_container, filename):
                 await asyncio.sleep(2)
             
             # remove blob
-            if is_valid_file_name(filename):
-                prefix = os.path.splitext(os.path.basename(filename))[0]
-                blob_names = [b async for b in blob_container.list_blob_names(name_starts_with=os.path.splitext(os.path.basename(prefix))[0]) if re.match(f"{prefix}-\d+\.pdf", b)]
-                for b in blob_names:
-                    await blob_container.delete_blob(b)
+            if filename.startswith("http"):
+                print(f"Skipping blob removal for URL-based filename: {filename}")
+            else:
+                if is_valid_file_name(filename):
+                    prefix = os.path.splitext(os.path.basename(filename))[0]
+                    blob_names = [b async for b in blob_container.list_blob_names(name_starts_with=os.path.splitext(os.path.basename(prefix))[0]) if re.match(f"{prefix}-\d+\.pdf", b)]
+                    for b in blob_names:
+                        await blob_container.delete_blob(b)
     except Exception as e:
         # Handle exceptions here, e.g., log the error or perform specific actions.
         print(f"An error occurred: {e}")
