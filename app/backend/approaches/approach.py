@@ -215,8 +215,8 @@ class Approach(ABC):
             return [
                 {
                     "filename": self.get_citation((doc.sourcepage or ""), use_image_citation),
-                    "content": nonewlines(" . ".join([cast(str, c.text) for c in (doc.captions or [])])),
-                    "sourcefile": doc.sourcefile or ""
+                    "content": nonewlines(" . ".join([cast(str, c.text) for c in (doc.captions or [])]))
+                  
                 }
                 for doc in results
             ]
@@ -224,8 +224,7 @@ class Approach(ABC):
             return [
                 {
                     "filename": self.get_citation((doc.sourcepage or ""), use_image_citation),
-                    "content": nonewlines(doc.content or ""),
-                    "sourcefile": doc.sourcefile or ""
+                    "content": nonewlines(doc.content or "")
                 }
                 for doc in results
             ]

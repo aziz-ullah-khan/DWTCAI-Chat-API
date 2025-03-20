@@ -171,8 +171,8 @@ class ChatReadRetrieveReadApproach(ChatApproach):
         # )
 
         prompt_override = overrides.get("prompt_template")
-        # if service_prompt:
-        #     prompt_override = service_prompt
+        if service_prompt:
+            prompt_override = service_prompt
 
         rendered_answer_prompt = self.prompt_manager.render_prompt(
             self.answer_prompt,
@@ -184,7 +184,7 @@ class ChatReadRetrieveReadApproach(ChatApproach):
                 "text_sources": text_sources,
             },
         )
-
+        
         response_token_limit = 1024
         messages = build_messages(
             model=self.chatgpt_model,
@@ -199,11 +199,9 @@ class ChatReadRetrieveReadApproach(ChatApproach):
         {
             "filename": f.get("filename", "").strip(),
             "filecontent": f.get("content", "").strip(),
-            "sourcefile": f.get("sourcefile", "").strip()
         }
         for f in text_sources  # Iterate through JSON objects
         ]
-
      
         extra_info = {
             "data_points": datapoints,
