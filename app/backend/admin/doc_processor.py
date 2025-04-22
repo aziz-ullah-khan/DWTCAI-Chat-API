@@ -68,12 +68,19 @@ if "AZURE_STORAGE_ACCOUNT" not in os.environ:
 async def prepdocs_processor(files_dir, container, index, max_depth, url=None):
     # Running "prepdocs.py" with user-provided values
     print('Running "prepdocs.py"')
-    if url:
-        command = f'python ./prepdocs.py "{url}" --url "{url}" --max_depth {max_depth} --storagekey "$AZURE_STORAGE_KEY" --container "{container}" --searchservice "$AZURE_SEARCH_SERVICE" --searchkey "$AZURE_SEARCH_KEY" --index "{index}" --documentintelligencekey "$AZURE_FORMRECOGNIZER_KEY" -v'
-        stdout_lines = await run_command(command)
-    else:
-        command = f'python ./prepdocs.py "{files_dir}/*"  --storagekey "$AZURE_STORAGE_KEY" --container "{container}" --searchservice "$AZURE_SEARCH_SERVICE" --searchkey "$AZURE_SEARCH_KEY" --index "{index}" --documentintelligencekey "$AZURE_FORMRECOGNIZER_KEY" -v'
-        stdout_lines = await run_command(command)
+    storage_key = os.getenv("AZURE_STORAGE_KEY")
+    search_service = os.getenv("AZURE_SEARCH_SERVICE")
+    search_key = os.getenv("AZURE_SEARCH_KEY")
+    document_intelligence_key = os.getenv("AZURE_FORMRECOGNIZER_KEY")
+
+    # Now, check if keys exist in environment variables or .env file
+    if storage_key and search_service and search_key and document_intelligence_key:
+        if url:
+            command = f'python ./prepdocs.py "{url}" --url "{url}" --max_depth {max_depth} --storagekey "{storage_key}" --container "{container}" --searchservice "{search_service}" --searchkey "{search_key}" --index "{index}" --documentintelligencekey "{document_intelligence_key}" -v'
+            stdout_lines = await run_command(command)
+        else:
+            command = f'python ./prepdocs.py "{files_dir}/*" --storagekey "{storage_key}" --container "{container}" --searchservice "{search_service}" --searchkey "{search_key}" --index "{index}" --documentintelligencekey "{document_intelligence_key}" -v'
+            stdout_lines = await run_command(command)
 
 
     filename = extract_filenames(stdout_lines)
