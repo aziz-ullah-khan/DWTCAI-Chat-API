@@ -27,16 +27,16 @@ jobs:
         os: ["ubuntu-20.04", "windows-latest"]
         python_version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     steps:
-        - uses: actions/checkout@v4
+        - uses: actions/checkout@v5
         - name: Install uv
-          uses: astral-sh/setup-uv@v5
+          uses: astral-sh/setup-uv@v7
           with:
             enable-cache: true
             version: "0.4.20"
             cache-dependency-glob: "requirements**.txt"
             python-version: ${{ matrix.python_version }}
         - name: Setup node
-          uses: actions/setup-node@v4
+          uses: actions/setup-node@v5
           with:
             node-version: 18
         - name: Build frontend
